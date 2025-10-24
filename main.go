@@ -74,37 +74,16 @@ func listApps(conn *dbus.Conn) error {
 	return nil
 }
 
-func getAddressById(conn *dbus.Conn, appId string) (string, dbus.ObjectPath, error) {
-	systrayItems, err := getSystrayItems(conn)
+func printMenu(conn *dbus.Conn, appAddress string) error {
+	addr, path, err := splitAddress(appAddress)
 	if err != nil {
-		panic(fmt.Errorf("Failed to retrieve systray items: %v\n", err))
-	}
-
-	for _, item := range systrayItems {
-		tmpAppId, _ := getAppId(conn, item)
-		if appId == tmpAppId {
-			addr, path, err := splitAddress(item)
-			if err != nil {
-				return "", dbus.ObjectPath(""), err
-			}
-			return addr, path, nil
-		}
-	}
-	return "", dbus.ObjectPath(""), fmt.Errorf("Application not found: %s", appId)
-}
-
-func printMenu(conn *dbus.Conn, appId string) error {
-	addr, path, err := getAddressById(conn, appId)
-	if err != nil {
-		panic(err)
-		// return err
+		return fmt.Errorf("Failed to split address: %v\n", err)
 	}
 	var menu_path dbus.ObjectPath
 	obj := conn.Object(addr, path)
 	err = dbusCall(obj, "org.freedesktop.DBus.Properties.Get", "org.kde.StatusNotifierItem", "Menu").Store(&menu_path)
 	if err != nil {
-		panic(err)
-		// return err
+		return fmt.Errorf("Failed to get menu path: %v\n", err)
 	}
 	fmt.Println(menu_path)
 
@@ -112,8 +91,7 @@ func printMenu(conn *dbus.Conn, appId string) error {
 	obj = conn.Object(addr, menu_path)
 	err = dbusCall(obj, "com.canonical.dbusmenu.AboutToShow", 0).Store(&variable)
 	if err != nil {
-		panic(err)
-		// return err
+		return fmt.Errorf("Failed to call AboutToShow: %v\n", err)
 	}
 
 	var rawLayout rawGetLayoutResponse
@@ -127,11 +105,47 @@ func printMenu(conn *dbus.Conn, appId string) error {
 	}
 
 	layout := convertLayout(rawLayout)
-	for _, item := range layout.Items {
+	printMenuItems(layout.Items, nil)
+
+	return nil
+}
+
+func printMenuItems(items []MenuItem, parents []string) {
+	for _, item := range items {
 		props := item.Properties
 
+		if !props.Visible {
+			continue
+		}
+
 		if props.Type == "separator" {
-			fmt.Println(" \t---")
+			// label := buildMenuLabel(parents, "---")
+			// fmt.Printf("s\t%s\n", label)
+			continue
+		}
+
+		if len(item.Children) == 0 && !props.HasLabel {
+			continue
+		}
+
+		sanitizedLabel := ""
+		if props.HasLabel {
+			sanitizedLabel = strings.Replace(props.Label, "_", "", 1)
+		}
+
+		if len(item.Children) > 0 {
+			if props.HasLabel {
+				path := buildMenuLabel(parents, sanitizedLabel)
+				display := path
+				if !props.Enabled {
+					display = fmt.Sprintf("<%s>", path)
+				}
+				fmt.Printf("|m:%d\t%s\n", item.ID, display)
+				nextParents := append(append([]string{}, parents...), sanitizedLabel)
+				printMenuItems(item.Children, nextParents)
+			} else {
+				printMenuItems(item.Children, parents)
+			}
 			continue
 		}
 
@@ -139,30 +153,29 @@ func printMenu(conn *dbus.Conn, appId string) error {
 			continue
 		}
 
-		label := strings.Replace(props.Label, "_", "", 1)
-
-		if !props.Visible {
-			continue
-		}
+		path := buildMenuLabel(parents, sanitizedLabel)
+		display := path
 		if !props.Enabled {
-			fmt.Printf(" \t<%s>\n", label)
-			continue
+			display = fmt.Sprintf("<%s>", path)
 		}
 
-		if len(item.Children) == 0 {
-			fmt.Printf("%d\t%s\n", item.ID, label)
-		} else {
-			fmt.Printf("%d\t%s ->\n", item.ID, label)
-		}
+		fmt.Printf("a:%d\t%s\n", item.ID, display)
 	}
+}
 
-	return nil
+func buildMenuLabel(parents []string, label string) string {
+	parts := make([]string, 0, len(parents)+1)
+	parts = append(parts, parents...)
+	if label != "" {
+		parts = append(parts, label)
+	}
+	return strings.Join(parts, " > ")
 }
 
 func main() {
 	list := flag.Bool("list", false, "List all systray items")
 	menu := flag.Bool("menu", false, "Print menu items for application")
-	appid := flag.String("app", "", "Application to print menu items for")
+	app := flag.String("app", "", "Application address to print menu items for")
 	flag.Parse()
 
 	if !*list && !*menu {
@@ -179,8 +192,8 @@ func main() {
 	if *list {
 		listApps(conn)
 	}
-	if *menu && *appid != "" {
-		err := printMenu(conn, *appid)
+	if *menu && *app != "" {
+		err := printMenu(conn, *app)
 		if err != nil {
 			panic(err)
 		}
