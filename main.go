@@ -1,19 +1,29 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/godbus/dbus/v5"
 )
+
+const dbusCallTimeout = 1 * time.Second
+
+func dbusCall(obj dbus.BusObject, method string, args ...any) *dbus.Call {
+	ctx, cancel := context.WithTimeout(context.Background(), dbusCallTimeout)
+	defer cancel()
+	return obj.CallWithContext(ctx, method, 0, args...)
+}
 
 func getSystrayItems(conn *dbus.Conn) ([]string, error) {
 	obj := conn.Object("org.kde.StatusNotifierWatcher", "/StatusNotifierWatcher")
 	var systrayItems []string
 
-	err := obj.Call("org.freedesktop.DBus.Properties.Get", 0, "org.kde.StatusNotifierWatcher", "RegisteredStatusNotifierItems").Store(&systrayItems)
+	err := dbusCall(obj, "org.freedesktop.DBus.Properties.Get", "org.kde.StatusNotifierWatcher", "RegisteredStatusNotifierItems").Store(&systrayItems)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get systray items: %w", err)
 	}
@@ -35,7 +45,7 @@ func getAppId(conn *dbus.Conn, item string) (string, error) {
 	obj := conn.Object(address, path)
 
 	var title dbus.Variant
-	err = obj.Call("org.freedesktop.DBus.Properties.Get", 0, "org.kde.StatusNotifierItem", "Id").Store(&title)
+	err = dbusCall(obj, "org.freedesktop.DBus.Properties.Get", "org.kde.StatusNotifierItem", "Id").Store(&title)
 	if err != nil {
 		return "", fmt.Errorf("Error getting title for %s%s: %v", address, path, err)
 	}
@@ -103,7 +113,7 @@ func printMenu(conn *dbus.Conn, appId string) error {
 	}
 	var menu_path dbus.ObjectPath
 	obj := conn.Object(addr, path)
-	err = obj.Call("org.freedesktop.DBus.Properties.Get", 0, "org.kde.StatusNotifierItem", "Menu").Store(&menu_path)
+	err = dbusCall(obj, "org.freedesktop.DBus.Properties.Get", "org.kde.StatusNotifierItem", "Menu").Store(&menu_path)
 	if err != nil {
 		panic(err)
 		// return err
@@ -112,7 +122,7 @@ func printMenu(conn *dbus.Conn, appId string) error {
 
 	var variable dbus.Variant
 	obj = conn.Object(addr, menu_path)
-	err = obj.Call("com.canonical.dbusmenu.AboutToShow", 0, 0).Store(&variable)
+	err = dbusCall(obj, "com.canonical.dbusmenu.AboutToShow", 0).Store(&variable)
 	if err != nil {
 		panic(err)
 		// return err
@@ -122,7 +132,7 @@ func printMenu(conn *dbus.Conn, appId string) error {
 	var revision uint32
 	var list []string
 	obj = conn.Object(addr, menu_path)
-	err = obj.Call("com.canonical.dbusmenu.GetLayout", 0, 0, -1, list).Store(&revision, &layout)
+	err = dbusCall(obj, "com.canonical.dbusmenu.GetLayout", 0, -1, list).Store(&revision, &layout)
 	if err != nil {
 		panic(err)
 		// return err
