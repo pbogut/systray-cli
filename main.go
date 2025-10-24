@@ -59,7 +59,7 @@ func listApps(conn *dbus.Conn) error {
 		if err != nil {
 			continue
 		}
-		fmt.Println(appId)
+		fmt.Printf("%s\t%s\n", item, appId)
 	}
 	return nil
 }
