@@ -93,18 +93,6 @@ func getAddressById(conn *dbus.Conn, appId string) (string, dbus.ObjectPath, err
 	return "", dbus.ObjectPath(""), fmt.Errorf("Application not found: %s", appId)
 }
 
-type MenuItem struct {
-	ID         int32
-	Properties map[string]any
-	Children   []MenuItem // Adjust if children are further structured
-}
-
-type GetLayoutResponse struct {
-	Version   int32
-	RootProps map[string]dbus.Variant
-	Items     []MenuItem
-}
-
 func printMenu(conn *dbus.Conn, appId string) error {
 	addr, path, err := getAddressById(conn, appId)
 	if err != nil {
@@ -128,46 +116,43 @@ func printMenu(conn *dbus.Conn, appId string) error {
 		// return err
 	}
 
-	var layout GetLayoutResponse
+	var rawLayout rawGetLayoutResponse
 	var revision uint32
 	var list []string
 	obj = conn.Object(addr, menu_path)
-	err = dbusCall(obj, "com.canonical.dbusmenu.GetLayout", 0, -1, list).Store(&revision, &layout)
+	err = dbusCall(obj, "com.canonical.dbusmenu.GetLayout", 0, -1, list).Store(&revision, &rawLayout)
 	if err != nil {
 		panic(err)
 		// return err
 	}
+
+	layout := convertLayout(rawLayout)
 	for _, item := range layout.Items {
-		enabled := true
-		visible := true
-		label := ""
-		if item.Properties["type"] != nil {
-			if item.Properties["type"].(string) == "separator" {
-				fmt.Println(" \t---")
-			}
+		props := item.Properties
+
+		if props.Type == "separator" {
+			fmt.Println(" \t---")
+			continue
 		}
-		if item.Properties["enabled"] != nil {
-			enabled = item.Properties["enabled"].(bool)
+
+		if !props.HasLabel {
+			continue
 		}
-		if item.Properties["visible"] != nil {
-			visible = item.Properties["visible"].(bool)
+
+		label := strings.Replace(props.Label, "_", "", 1)
+
+		if !props.Visible {
+			continue
 		}
-		if item.Properties["type"] != nil {
+		if !props.Enabled {
+			fmt.Printf(" \t<%s>\n", label)
+			continue
 		}
-		if item.Properties["label"] != nil {
-			label = item.Properties["label"].(string)
-			label = strings.Replace(label, "_", "", 1)
-			if visible {
-				if enabled {
-					if len(item.Children) == 0 {
-						fmt.Printf("%d\t%s\n", item.ID, label)
-					} else {
-						fmt.Printf("%d\t%s ->\n", item.ID, label)
-					}
-				} else {
-					fmt.Printf(" \t<%s>\n", label)
-				}
-			}
+
+		if len(item.Children) == 0 {
+			fmt.Printf("%d\t%s\n", item.ID, label)
+		} else {
+			fmt.Printf("%d\t%s ->\n", item.ID, label)
 		}
 	}
 
