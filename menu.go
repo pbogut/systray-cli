@@ -3,11 +3,13 @@ package main
 import "github.com/godbus/dbus/v5"
 
 type MenuProperties struct {
-	Type     string
-	Enabled  bool
-	Visible  bool
-	Label    string
-	HasLabel bool
+	Type        string
+	Enabled     bool
+	Visible     bool
+	Label       string
+	HasLabel    bool
+	ToggleType  string
+	ToggleState bool
 }
 
 type MenuItem struct {
@@ -93,6 +95,16 @@ func newMenuProperties(props map[string]dbus.Variant) MenuProperties {
 			r.Label = value
 			r.HasLabel = true
 		}
+	}
+
+	if v, ok := props["toggle-type"]; ok {
+		if value, ok := v.Value().(string); ok {
+			r.ToggleType = value
+		}
+	}
+
+	if v, ok := props["toggle-state"]; ok {
+		r.ToggleState = v.Value().(int32) != 0
 	}
 
 	return r

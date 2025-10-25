@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -11,6 +12,26 @@ import (
 )
 
 const dbusCallTimeout = 1 * time.Second
+
+type MenuPrintOptions struct {
+	Separator        string
+	PrintChildren    bool
+	PrintParent      bool
+	ParentID         int32
+	ChekmarkChecked  string
+	ChekmarkUnhecked string
+}
+
+func newMenuPrintOptions() MenuPrintOptions {
+	return MenuPrintOptions{
+		Separator:        "---",
+		PrintChildren:    true,
+		PrintParent:      true,
+		ParentID:         -1,
+		ChekmarkChecked:  "[x]",
+		ChekmarkUnhecked: "[ ]",
+	}
+}
 
 func dbusCall(obj dbus.BusObject, method string, args ...any) *dbus.Call {
 	ctx, cancel := context.WithTimeout(context.Background(), dbusCallTimeout)
@@ -73,7 +94,7 @@ func listApps(conn *dbus.Conn) error {
 	return nil
 }
 
-func printMenu(conn *dbus.Conn, appAddress string) error {
+func printMenu(conn *dbus.Conn, appAddress string, opt MenuPrintOptions) error {
 	addr, path, err := splitAddress(appAddress)
 	if err != nil {
 		return fmt.Errorf("Failed to split address: %v\n", err)
@@ -102,14 +123,20 @@ func printMenu(conn *dbus.Conn, appAddress string) error {
 		// return err
 	}
 
+	// fmt.Println(rawLayout)
 	layout := convertLayout(rawLayout)
-	menuAddress := fmt.Sprintf("%s%s", addr, menu_path)
-	printMenuItems(layout.Items, nil, menuAddress)
+	if opt.ParentID != -1 {
+		printMenuItems(layout.Items, nil, appAddress, opt)
+		return nil
+	}
+
+	// menuItem := findChildrenFor(layout.items, opt.ParentID)
+	// printMenuItems(menuItem.Children, nil, appAddress, opt)
 
 	return nil
 }
 
-func printMenuItems(items []MenuItem, parents []string, address string) {
+func printMenuItems(items []MenuItem, parents []string, address string, opt MenuPrintOptions) {
 	for _, item := range items {
 		props := item.Properties
 
@@ -117,8 +144,8 @@ func printMenuItems(items []MenuItem, parents []string, address string) {
 			continue
 		}
 
-		if props.Type == "separator" {
-			label := buildMenuLabel(parents, "---")
+		if props.Type == "separator" && opt.Separator != "" {
+			label := buildMenuLabel(parents, opt.Separator)
 			fmt.Printf("-\t%s\n", label)
 			continue
 		}
@@ -132,33 +159,29 @@ func printMenuItems(items []MenuItem, parents []string, address string) {
 			sanitizedLabel = strings.Replace(props.Label, "_", "", 1)
 		}
 
-		if len(item.Children) > 0 {
-			if props.HasLabel {
-				path := buildMenuLabel(parents, sanitizedLabel)
-				display := path
-				if !props.Enabled {
-					display = fmt.Sprintf("<%s>", path)
-				}
-				fmt.Printf("menu|%d|%s\t%s >\n", item.ID, address, display)
-				nextParents := append(append([]string{}, parents...), sanitizedLabel)
-				printMenuItems(item.Children, nextParents, address)
-			} else {
-				printMenuItems(item.Children, parents, address)
+		if props.HasLabel {
+			path := buildMenuLabel(parents, sanitizedLabel)
+			display := decorateLabel(path, props, opt)
+			if !props.Enabled {
+				display = fmt.Sprintf("<%s>", display)
 			}
+
+			if len(item.Children) > 0 {
+				if opt.PrintParent {
+					fmt.Printf("menu|%d|%s\t%s >\n", item.ID, address, display)
+				}
+			} else {
+				fmt.Printf("action|%d|%s\t%s\n", item.ID, address, display)
+			}
+		}
+
+		if len(item.Children) > 0 && opt.PrintChildren {
+			if props.HasLabel {
+				parents = append(append([]string{}, parents...), sanitizedLabel)
+			}
+			printMenuItems(item.Children, parents, address, opt)
 			continue
 		}
-
-		if !props.HasLabel {
-			continue
-		}
-
-		path := buildMenuLabel(parents, sanitizedLabel)
-		display := path
-		if !props.Enabled {
-			display = fmt.Sprintf("<%s>", path)
-		}
-
-		fmt.Printf("action|%d|%s\t%s\n", item.ID, address, display)
 	}
 }
 
@@ -169,6 +192,26 @@ func buildMenuLabel(parents []string, label string) string {
 		parts = append(parts, label)
 	}
 	return strings.Join(parts, " > ")
+}
+
+func decorateLabel(base string, props MenuProperties, opt MenuPrintOptions) string {
+	if props.ToggleType == "" {
+		return base
+	}
+
+	if props.ToggleType == "checkmark" {
+		state := opt.ChekmarkUnhecked
+		if props.ToggleState {
+			state = opt.ChekmarkChecked
+		}
+		return fmt.Sprintf("%s %s", base, state)
+	}
+
+	state := "off"
+	if props.ToggleState {
+		state = "on"
+	}
+	return fmt.Sprintf("%s [%s:%s]", base, props.ToggleType, state)
 }
 
 func main() {
@@ -196,10 +239,23 @@ func main() {
 		listApps(conn)
 	}
 
+	printOptions := newMenuPrintOptions()
 	if handle != "" {
 		parts := strings.Split(handle, "|")
 		if len(parts) == 2 && parts[0] == "tray" {
-			err := printMenu(conn, parts[1])
+			err := printMenu(conn, parts[1], printOptions)
+			if err != nil {
+				panic(err)
+			}
+		}
+		if len(parts) == 3 && parts[0] == "menu" {
+			parentId, err := strconv.Atoi(parts[1])
+			if err != nil {
+				panic(fmt.Errorf("invalid parent id: %s", parts[1]))
+			}
+			printOptions.ParentID = int32(parentId)
+			err = printMenu(conn, parts[2], printOptions)
+
 			if err != nil {
 				panic(err)
 			}
