@@ -125,13 +125,13 @@ func printMenu(conn *dbus.Conn, appAddress string, opt MenuPrintOptions) error {
 
 	// fmt.Println(rawLayout)
 	layout := convertLayout(rawLayout)
-	if opt.ParentID != -1 {
+	if opt.ParentID == -1 {
 		printMenuItems(layout.Items, nil, appAddress, opt)
 		return nil
 	}
 
-	// menuItem := findChildrenFor(layout.items, opt.ParentID)
-	// printMenuItems(menuItem.Children, nil, appAddress, opt)
+	menuItem := findItemById(layout.Items, opt.ParentID)
+	printMenuItems(menuItem.Children, nil, appAddress, opt)
 
 	return nil
 }

@@ -62,6 +62,30 @@ func convertMenuItem(raw rawMenuItem) MenuItem {
 	}
 }
 
+func findItemById(items []MenuItem, id int32) MenuItem {
+	if item, ok := findMenuItemRecursive(items, id); ok {
+		return item
+	}
+
+	return MenuItem{}
+}
+
+func findMenuItemRecursive(items []MenuItem, id int32) (MenuItem, bool) {
+	for _, item := range items {
+		if item.ID == id {
+			return item, true
+		}
+
+		if len(item.Children) > 0 {
+			if found, ok := findMenuItemRecursive(item.Children, id); ok {
+				return found, true
+			}
+		}
+	}
+
+	return MenuItem{}, false
+}
+
 func newMenuProperties(props map[string]dbus.Variant) MenuProperties {
 	r := MenuProperties{
 		Enabled: true,
