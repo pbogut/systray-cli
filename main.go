@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"flag"
 	"fmt"
 	"os"
 	"strings"
@@ -69,7 +68,7 @@ func listApps(conn *dbus.Conn) error {
 		if err != nil {
 			continue
 		}
-		fmt.Printf("%s\t%s\n", item, appId)
+		fmt.Printf("tray|%s\t%s\n", item, appId)
 	}
 	return nil
 }
@@ -85,7 +84,6 @@ func printMenu(conn *dbus.Conn, appAddress string) error {
 	if err != nil {
 		return fmt.Errorf("Failed to get menu path: %v\n", err)
 	}
-	fmt.Println(menu_path)
 
 	var variable dbus.Variant
 	obj = conn.Object(addr, menu_path)
@@ -105,12 +103,13 @@ func printMenu(conn *dbus.Conn, appAddress string) error {
 	}
 
 	layout := convertLayout(rawLayout)
-	printMenuItems(layout.Items, nil)
+	menuAddress := fmt.Sprintf("%s%s", addr, menu_path)
+	printMenuItems(layout.Items, nil, menuAddress)
 
 	return nil
 }
 
-func printMenuItems(items []MenuItem, parents []string) {
+func printMenuItems(items []MenuItem, parents []string, address string) {
 	for _, item := range items {
 		props := item.Properties
 
@@ -119,8 +118,8 @@ func printMenuItems(items []MenuItem, parents []string) {
 		}
 
 		if props.Type == "separator" {
-			// label := buildMenuLabel(parents, "---")
-			// fmt.Printf("s\t%s\n", label)
+			label := buildMenuLabel(parents, "---")
+			fmt.Printf("-\t%s\n", label)
 			continue
 		}
 
@@ -140,11 +139,11 @@ func printMenuItems(items []MenuItem, parents []string) {
 				if !props.Enabled {
 					display = fmt.Sprintf("<%s>", path)
 				}
-				fmt.Printf("|m:%d\t%s\n", item.ID, display)
+				fmt.Printf("menu|%d|%s\t%s >\n", item.ID, address, display)
 				nextParents := append(append([]string{}, parents...), sanitizedLabel)
-				printMenuItems(item.Children, nextParents)
+				printMenuItems(item.Children, nextParents, address)
 			} else {
-				printMenuItems(item.Children, parents)
+				printMenuItems(item.Children, parents, address)
 			}
 			continue
 		}
@@ -159,7 +158,7 @@ func printMenuItems(items []MenuItem, parents []string) {
 			display = fmt.Sprintf("<%s>", path)
 		}
 
-		fmt.Printf("a:%d\t%s\n", item.ID, display)
+		fmt.Printf("action|%d|%s\t%s\n", item.ID, address, display)
 	}
 }
 
@@ -173,14 +172,18 @@ func buildMenuLabel(parents []string, label string) string {
 }
 
 func main() {
-	list := flag.Bool("list", false, "List all systray items")
-	menu := flag.Bool("menu", false, "Print menu items for application")
-	app := flag.String("app", "", "Application address to print menu items for")
-	flag.Parse()
+	list := false
+	handle := ""
 
-	if !*list && !*menu {
-		flag.PrintDefaults()
-		os.Exit(0)
+	if len(os.Args) == 1 {
+		list = true
+	}
+	if len(os.Args) == 2 {
+		handle = os.Args[1]
+	}
+
+	if !list && handle == "" {
+		os.Exit(1)
 	}
 
 	conn, err := dbus.ConnectSessionBus()
@@ -189,13 +192,17 @@ func main() {
 	}
 	defer conn.Close()
 
-	if *list {
+	if list {
 		listApps(conn)
 	}
-	if *menu && *app != "" {
-		err := printMenu(conn, *app)
-		if err != nil {
-			panic(err)
+
+	if handle != "" {
+		parts := strings.Split(handle, "|")
+		if len(parts) == 2 && parts[0] == "tray" {
+			err := printMenu(conn, parts[1])
+			if err != nil {
+				panic(err)
+			}
 		}
 	}
 }
