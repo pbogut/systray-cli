@@ -26,7 +26,7 @@ func newMenuPrintOptions() MenuPrintOptions {
 	return MenuPrintOptions{
 		Separator:        "---",
 		PrintChildren:    true,
-		PrintParent:      true,
+		PrintParent:      false,
 		ParentID:         -1,
 		ChekmarkChecked:  "[x]",
 		ChekmarkUnhecked: "[ ]",
@@ -136,6 +136,30 @@ func printMenu(conn *dbus.Conn, appAddress string, opt MenuPrintOptions) error {
 	return nil
 }
 
+func clickAction(conn *dbus.Conn, appAddress string, actionID int) error {
+	addr, path, err := splitAddress(appAddress)
+	if err != nil {
+		return fmt.Errorf("failed to split address: %w", err)
+	}
+
+	itemObj := conn.Object(addr, path)
+
+	var menuPath dbus.ObjectPath
+	if err := dbusCall(itemObj, "org.freedesktop.DBus.Properties.Get", "org.kde.StatusNotifierItem", "Menu").Store(&menuPath); err != nil {
+		return fmt.Errorf("failed to get menu path: %w", err)
+	}
+
+	menuObj := conn.Object(addr, menuPath)
+	variant := dbus.MakeVariant("")
+	timestamp := uint32(time.Now().Unix())
+
+	if call := dbusCall(menuObj, "com.canonical.dbusmenu.Event", int32(actionID), "clicked", variant, timestamp); call.Err != nil {
+		return fmt.Errorf("failed to invoke menu action: %w", call.Err)
+	}
+
+	return nil
+}
+
 func printMenuItems(items []MenuItem, parents []string, address string, opt MenuPrintOptions) {
 	for _, item := range items {
 		props := item.Properties
@@ -177,9 +201,11 @@ func printMenuItems(items []MenuItem, parents []string, address string, opt Menu
 
 		if len(item.Children) > 0 && opt.PrintChildren {
 			if props.HasLabel {
-				parents = append(append([]string{}, parents...), sanitizedLabel)
+				newParents := append(append([]string{}, parents...), sanitizedLabel)
+				printMenuItems(item.Children, newParents, address, opt)
+			} else {
+				printMenuItems(item.Children, parents, address, opt)
 			}
-			printMenuItems(item.Children, parents, address, opt)
 			continue
 		}
 	}
@@ -258,6 +284,16 @@ func main() {
 
 			if err != nil {
 				panic(err)
+			}
+		}
+		if len(parts) == 3 && parts[0] == "action" {
+			actionId, err := strconv.Atoi(parts[1])
+			if err != nil {
+				panic(fmt.Errorf("invalid action id: %s", parts[1]))
+			}
+			err = clickAction(conn, parts[2], actionId)
+			if err != nil {
+				panic(fmt.Errorf("failed to click action: %v", err))
 			}
 		}
 	}
