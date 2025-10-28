@@ -1,0 +1,14 @@
+show_parent = true
+show_children = false
+separator = ""
+menu_indicator = ""
+menu_separator = "  "
+checkmark_checked = "✔"
+checkmark_unchecked = "✘"
+
+[names]
+"KDE Connect Indicator" = " KDE Connect"
+nm-applet               = " NetworkManager"
+CopyQ_copyq             = " CopyQ"
+traydvm                 = "󱊟 UDisks"
+Nextcloud               = "󰘿 Nextcloud"
