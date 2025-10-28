@@ -14,22 +14,26 @@ import (
 const dbusCallTimeout = 1 * time.Second
 
 type MenuPrintOptions struct {
-	Separator        string
-	PrintChildren    bool
-	PrintParent      bool
-	ParentID         int32
-	ChekmarkChecked  string
-	ChekmarkUnhecked string
+	CheckmarkChecked  string
+	CheckmarkUnhecked string
+	MenuIndicator     string
+	MenuSeparator     string
+	ParentID          int32
+	PrintChildren     bool
+	PrintParent       bool
+	Separator         string
 }
 
-func newMenuPrintOptions() MenuPrintOptions {
+func newMenuPrintOptions(cfg Config) MenuPrintOptions {
 	return MenuPrintOptions{
-		Separator:        "---",
-		PrintChildren:    true,
-		PrintParent:      false,
-		ParentID:         -1,
-		ChekmarkChecked:  "[x]",
-		ChekmarkUnhecked: "[ ]",
+		CheckmarkChecked:  cfg.CheckmarkChecked,
+		CheckmarkUnhecked: cfg.CheckmarkUnchecked,
+		MenuIndicator:     cfg.MenuIndicator,
+		MenuSeparator:     cfg.MenuSeparator,
+		ParentID:          -1,
+		PrintChildren:     cfg.ShowChildren,
+		PrintParent:       cfg.ShowParent,
+		Separator:         cfg.Separator,
 	}
 }
 
@@ -78,7 +82,7 @@ func getAppId(conn *dbus.Conn, item string) (string, error) {
 	return appName, nil
 }
 
-func listApps(conn *dbus.Conn) error {
+func listApps(conn *dbus.Conn, cfg Config) error {
 	systrayItems, err := getSystrayItems(conn)
 	if err != nil {
 		return fmt.Errorf("Failed to retrieve systray items: %v\n", err)
@@ -89,7 +93,13 @@ func listApps(conn *dbus.Conn) error {
 		if err != nil {
 			continue
 		}
-		fmt.Printf("tray|%s\t%s\n", item, appId)
+
+		display := appId
+		if alias, ok := cfg.Names[appId]; ok && alias != "" {
+			display = alias
+		}
+
+		fmt.Printf("tray|%s\t%s\n", item, display)
 	}
 	return nil
 }
@@ -169,7 +179,7 @@ func printMenuItems(items []MenuItem, parents []string, address string, opt Menu
 		}
 
 		if props.Type == "separator" && opt.Separator != "" {
-			label := buildMenuLabel(parents, opt.Separator)
+			label := buildMenuLabel(parents, opt.Separator, opt)
 			fmt.Printf("-\t%s\n", label)
 			continue
 		}
@@ -184,7 +194,7 @@ func printMenuItems(items []MenuItem, parents []string, address string, opt Menu
 		}
 
 		if props.HasLabel {
-			path := buildMenuLabel(parents, sanitizedLabel)
+			path := buildMenuLabel(parents, sanitizedLabel, opt)
 			display := decorateLabel(path, props, opt)
 			if !props.Enabled {
 				display = fmt.Sprintf("<%s>", display)
@@ -192,7 +202,7 @@ func printMenuItems(items []MenuItem, parents []string, address string, opt Menu
 
 			if len(item.Children) > 0 {
 				if opt.PrintParent {
-					fmt.Printf("menu|%d|%s\t%s >\n", item.ID, address, display)
+					fmt.Printf("menu|%d|%s\t%s %s\n", item.ID, address, display, opt.MenuIndicator)
 				}
 			} else {
 				fmt.Printf("action|%d|%s\t%s\n", item.ID, address, display)
@@ -211,13 +221,13 @@ func printMenuItems(items []MenuItem, parents []string, address string, opt Menu
 	}
 }
 
-func buildMenuLabel(parents []string, label string) string {
+func buildMenuLabel(parents []string, label string, opt MenuPrintOptions) string {
 	parts := make([]string, 0, len(parents)+1)
 	parts = append(parts, parents...)
 	if label != "" {
 		parts = append(parts, label)
 	}
-	return strings.Join(parts, " > ")
+	return strings.Join(parts, opt.MenuSeparator)
 }
 
 func decorateLabel(base string, props MenuProperties, opt MenuPrintOptions) string {
@@ -226,9 +236,9 @@ func decorateLabel(base string, props MenuProperties, opt MenuPrintOptions) stri
 	}
 
 	if props.ToggleType == "checkmark" {
-		state := opt.ChekmarkUnhecked
+		state := opt.CheckmarkUnhecked
 		if props.ToggleState {
-			state = opt.ChekmarkChecked
+			state = opt.CheckmarkChecked
 		}
 		return fmt.Sprintf("%s %s", base, state)
 	}
@@ -251,6 +261,8 @@ func main() {
 		handle = os.Args[1]
 	}
 
+	cfg := loadRuntimeConfig()
+
 	if !list && handle == "" {
 		os.Exit(1)
 	}
@@ -262,11 +274,14 @@ func main() {
 	defer conn.Close()
 
 	if list {
-		listApps(conn)
+		if err := listApps(conn, cfg); err != nil {
+			panic(err)
+		}
 	}
 
-	printOptions := newMenuPrintOptions()
+	printOptions := newMenuPrintOptions(cfg)
 	if handle != "" {
+
 		parts := strings.Split(handle, "|")
 		if len(parts) == 2 && parts[0] == "tray" {
 			err := printMenu(conn, parts[1], printOptions)
