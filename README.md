@@ -2,6 +2,8 @@
 
 A tiny command-line companion for poking at DBus StatusNotifier (system tray) items. List the running tray apps, inspect their menus, and trigger actions straight from the shell.
 
+https://github.com/user-attachments/assets/4077185e-ed68-42c9-a231-cc0c4e5d822a
+
 ## Installation
 
 Using Go tooling (requires Go 1.25+):
